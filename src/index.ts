@@ -1,8 +1,9 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
-import { db } from "./database/knex";
+import { BaseDatabase } from "./database/BaseDatabase";
 import { TVideosDB } from "./types";
 import { Video } from "./classes/video";
+import { VideoDatabase } from "./database/VideoDatabase";
 
 const app = express();
 
@@ -33,23 +34,26 @@ app.get("/ping", async (req: Request, res: Response) => {
 
 app.get("/videos", async (req: Request, res: Response) => {
   try {
-    const q = req.query.q;
+    const q = req.query.q as string | undefined;
 
-    let videosDB;
+    // let videosDB;
 
-    if (q) {
-      const result: TVideosDB[] = await db("videos").where(
-        "title",
-        "LIKE",
-        `%${q}%`
-      );
-      videosDB = result;
-    } else {
-      const result: TVideosDB[] = await db("videos");
-      videosDB = result;
-    }
+    // if (q) {
+    //   const result: TVideosDB[] = await db("videos").where(
+    //     "title",
+    //     "LIKE",
+    //     `%${q}%`
+    //   );
+    //   videosDB = result;
+    // } else {
+    //   const result: TVideosDB[] = await db("videos");
+    //   videosDB = result;
+    // }
 
-    const videos: Video[] = videosDB.map(
+    const videoDatabase = new VideoDatabase();
+    const videosDB = await videoDatabase.findVideos(q);
+
+    const videos = videosDB.map(
       (videoDB) =>
         new Video(
           videoDB.id,
@@ -99,9 +103,8 @@ app.post("/videos", async (req: Request, res: Response) => {
       throw new Error("'uploaded_at' deve ser string");
     }
 
-    const [videoDBExists]: TVideosDB[] | undefined[] = await db("videos").where(
-      { id }
-    );
+    const videoDatabase = new VideoDatabase()
+    const videoDBExists = await videoDatabase.findVideoById(id)
 
     if (videoDBExists) {
       res.status(400);
@@ -122,7 +125,7 @@ app.post("/videos", async (req: Request, res: Response) => {
       uploaded_at: newVideo.getUploadedAt(),
     };
 
-    await db("videos").insert(newVideoDB);
+    await videoDatabase.insertVideo(newVideoDB)
 
     res.status(200).send({
       message: "Vídeo criado com sucesso",
@@ -151,14 +154,13 @@ app.put("/videos/:id", async (req: Request, res: Response) => {
     const newTitle = req.body.title;
     const newVideoLength = req.body.video_length;
 
-    const [selectedVideo]: TVideosDB[] | undefined[] = await db("videos").where(
-      { id: paramsId }
-    );
+    const videoDatabase = new VideoDatabase()
+    const videoDBExists = await videoDatabase.findVideoById(paramsId)
 
-    if (!selectedVideo) {
+    if (!videoDBExists) {
       res.status(400);
       throw new Error("Esse vídeo não existe");
-    } else if (selectedVideo) {
+    } else if (videoDBExists) {
       if (typeof newTitle !== "string" && typeof newTitle !== undefined) {
         res.status(400);
         throw new Error("Tipo de Title inválido");
@@ -187,13 +189,13 @@ app.put("/videos/:id", async (req: Request, res: Response) => {
       );
 
       const editedVideoDB: TVideosDB = {
-        id: editedVideo.getId() || selectedVideo.id,
-        title: editedVideo.getTitle() || selectedVideo.title,
-        video_length: editedVideo.getVideoLength() || selectedVideo.video_length,
-        uploaded_at: editedVideo.getUploadedAt() || selectedVideo.uploaded_at,
+        id: editedVideo.getId() || videoDBExists.id,
+        title: editedVideo.getTitle() || videoDBExists.title,
+        video_length: editedVideo.getVideoLength() || videoDBExists.video_length,
+        uploaded_at: editedVideo.getUploadedAt() || videoDBExists.uploaded_at,
       };
 
-      await db("videos").update(editedVideoDB).where({ id: paramsId });
+      await videoDatabase.updateVideo(editedVideoDB, paramsId)
 
       res.status(200).send({
         message: "Vídeo editado com sucesso!",
@@ -219,14 +221,15 @@ app.delete("/videos/:id", async (req: Request, res: Response) => {
   try {
     const id = req.params.id;
 
-    const videoToDelete: TVideosDB[] | undefined[] = await db("videos").where({id})
+    const videoDatabase = new VideoDatabase();
+    const videoToDelete = await videoDatabase.findVideos(id);
 
     if(!videoToDelete) {
       res.status(404)
       throw new Error("Esse vídeo não existe no banco de dados");
     }
 
-    await db("videos").del().where({id})
+    await videoDatabase.deleteVideo(id)
 
     res.status(200).send(`Vídeo de id '${id}' deletado com sucesso`)
 
